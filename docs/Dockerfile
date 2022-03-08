@@ -15,13 +15,13 @@ RUN apt-get -qqy update \
     python3-distutils \
     python3-pip \
     python3.9 \
-    python3-distutils \
     python3.9-venv \
     software-properties-common \
     tzdata \
     sudo \
     unzip \
-  # Set Python 3.9 as the default
+  # Set Python 3.9 as the default. Python 3.9 is used due to spinx-js not
+  # supporting 3.10: https://github.com/mozilla/sphinx-js/issues/186
   && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 1 \
   && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 2;
 
