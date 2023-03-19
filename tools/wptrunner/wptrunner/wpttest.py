@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import os
 import subprocess
 import sys
@@ -11,7 +13,7 @@ atom_reset = atoms["Reset"]
 enabled_tests = {"testharness", "reftest", "wdspec", "crashtest", "print-reftest"}
 
 
-class Result(object):
+class Result:
     def __init__(self,
                  status,
                  message,
@@ -29,10 +31,10 @@ class Result(object):
         self.stack = stack
 
     def __repr__(self):
-        return "<%s.%s %s>" % (self.__module__, self.__class__.__name__, self.status)
+        return f"<{self.__module__}.{self.__class__.__name__} {self.status}>"
 
 
-class SubtestResult(object):
+class SubtestResult:
     def __init__(self, name, status, message, stack=None, expected=None, known_intermittent=None):
         self.name = name
         if status not in self.statuses:
@@ -44,7 +46,7 @@ class SubtestResult(object):
         self.known_intermittent = known_intermittent if known_intermittent is not None else []
 
     def __repr__(self):
-        return "<%s.%s %s %s>" % (self.__module__, self.__class__.__name__, self.name, self.status)
+        return f"<{self.__module__}.{self.__class__.__name__} {self.name} {self.status}>"
 
 
 class TestharnessResult(Result):
@@ -89,7 +91,6 @@ class RunInfo(Dict[str, Any]):
                  browser_channel=None,
                  verify=None,
                  extras=None,
-                 enable_webrender=False,
                  device_serials=None,
                  adb_binary=None):
         import mozinfo
@@ -124,8 +125,6 @@ class RunInfo(Dict[str, Any]):
             self.update(extras)
         if "headless" not in self:
             self["headless"] = False
-
-        self["webrender"] = enable_webrender
 
         if adb_binary:
             self["adb_binary"] = adb_binary
@@ -204,17 +203,18 @@ def server_protocol(manifest_item):
     return "http"
 
 
-class Test(object):
+class Test:
 
     result_cls = None  # type: ClassVar[Type[Result]]
     subtest_result_cls = None  # type: ClassVar[Type[SubtestResult]]
     test_type = None  # type: ClassVar[str]
+    pac = None
 
     default_timeout = 10  # seconds
     long_timeout = 60  # seconds
 
     def __init__(self, url_base, tests_root, url, inherit_metadata, test_metadata,
-                 timeout=None, path=None, protocol="http", subdomain=False):
+                 timeout=None, path=None, protocol="http", subdomain=False, pac=None):
         self.url_base = url_base
         self.tests_root = tests_root
         self.url = url
@@ -226,6 +226,9 @@ class Test(object):
         self.environment = {"url_base": url_base,
                             "protocol": protocol,
                             "prefs": self.prefs}
+
+        if pac is not None:
+            self.environment["pac"] = urljoin(self.url, pac)
 
     def __eq__(self, other):
         if not isinstance(other, Test):
@@ -279,8 +282,7 @@ class Test(object):
                 if subtest_meta is not None:
                     yield subtest_meta
             yield self._get_metadata()
-        for metadata in reversed(self._inherit_metadata):
-            yield metadata
+        yield from reversed(self._inherit_metadata)
 
     def disabled(self, subtest=None):
         for meta in self.itermeta(subtest):
@@ -435,19 +437,8 @@ class Test(object):
         except KeyError:
             return []
 
-    def expect_any_subtest_status(self):
-        metadata = self._get_metadata()
-        if metadata is None:
-            return False
-        try:
-            # This key is used by the Blink CI to ignore subtest statuses
-            metadata.get("blink_expect_any_subtest_status")
-            return True
-        except KeyError:
-            return False
-
     def __repr__(self):
-        return "<%s.%s %s>" % (self.__module__, self.__class__.__name__, self.id)
+        return f"<{self.__module__}.{self.__class__.__name__} {self.id}>"
 
 
 class TestharnessTest(Test):
@@ -457,9 +448,9 @@ class TestharnessTest(Test):
 
     def __init__(self, url_base, tests_root, url, inherit_metadata, test_metadata,
                  timeout=None, path=None, protocol="http", testdriver=False,
-                 jsshell=False, scripts=None, subdomain=False):
+                 jsshell=False, scripts=None, subdomain=False, pac=None):
         Test.__init__(self, url_base, tests_root, url, inherit_metadata, test_metadata, timeout,
-                      path, protocol, subdomain)
+                      path, protocol, subdomain, pac)
 
         self.testdriver = testdriver
         self.jsshell = jsshell
@@ -468,6 +459,7 @@ class TestharnessTest(Test):
     @classmethod
     def from_manifest(cls, manifest_file, manifest_item, inherit_metadata, test_metadata):
         timeout = cls.long_timeout if manifest_item.timeout == "long" else cls.default_timeout
+        pac = manifest_item.pac
         testdriver = manifest_item.testdriver if hasattr(manifest_item, "testdriver") else False
         jsshell = manifest_item.jsshell if hasattr(manifest_item, "jsshell") else False
         script_metadata = manifest_item.script_metadata or []
@@ -479,6 +471,7 @@ class TestharnessTest(Test):
                    inherit_metadata,
                    test_metadata,
                    timeout=timeout,
+                   pac=pac,
                    path=os.path.join(manifest_file.tests_root, manifest_item.path),
                    protocol=server_protocol(manifest_item),
                    testdriver=testdriver,
@@ -674,14 +667,14 @@ class PrintReftestTest(ReftestTest):
     def __init__(self, url_base, tests_root, url, inherit_metadata, test_metadata, references,
                  timeout=None, path=None, viewport_size=None, dpi=None, fuzzy=None,
                  page_ranges=None, protocol="http", subdomain=False):
-        super(PrintReftestTest, self).__init__(url_base, tests_root, url, inherit_metadata, test_metadata,
-                                               references, timeout, path, viewport_size, dpi,
-                                               fuzzy, protocol, subdomain=subdomain)
+        super().__init__(url_base, tests_root, url, inherit_metadata, test_metadata,
+                         references, timeout, path, viewport_size, dpi,
+                         fuzzy, protocol, subdomain=subdomain)
         self._page_ranges = page_ranges
 
     @classmethod
     def cls_kwargs(cls, manifest_test):
-        rv = super(PrintReftestTest, cls).cls_kwargs(manifest_test)
+        rv = super().cls_kwargs(manifest_test)
         rv["page_ranges"] = manifest_test.page_ranges
         return rv
 

@@ -1,24 +1,35 @@
 'use strict';
 
 promise_test(async t => {
-  // The quantization thresholds and the quantized values that they lead to can
-  // be represented exactly in floating-point, so === comparison works.
-
-  const update = await new Promise((resolve, reject) => {
-    const observer = new ComputePressureObserver(
-        resolve, {cpuUtilizationThresholds: [0.5], cpuSpeedThresholds: [0.5]});
-    t.add_cleanup(() => observer.stop());
-    observer.observe().catch(reject);
+  await new Promise((resolve, reject) => {
+    const observer = new PressureObserver(resolve, {sampleRate: 1.0});
+    t.add_cleanup(() => observer.disconnect());
+    observer.observe('cpu').catch(reject);
   });
+}, 'An active PressureObserver calls its callback at least once');
 
-  assert_equals(typeof update.cpuUtilization, 'number');
-  assert_greater_than_equal(update.cpuUtilization, 0.0, 'cpuUtilization range');
-  assert_less_than_equal(update.cpuUtilization, 1.0, 'cpuUtilization range');
-  assert_in_array(update.cpuUtilization, [0.25, 0.75],
-                  'cpuUtilization quantization');
+promise_test(async t => {
+  await new Promise(resolve => {
+    const myDedicatedWorker = new Worker(
+        '/compute-pressure/resources/observer-in-dedicated-worker.js');
+    myDedicatedWorker.onmessage = event => {
+      assert_equals(typeof event.data.time, 'number');
+      assert_equals('cpu', event.data.source);
+      resolve();
+    };
+  });
+}, 'Test receives updates from dedicated worker');
 
-  assert_equals(typeof update.cpuSpeed, 'number');
-  assert_greater_than_equal(update.cpuSpeed, 0.0, 'cpuSpeed range');
-  assert_less_than_equal(update.cpuSpeed, 1.0, 'cpuUSpeed range');
-  assert_in_array(update.cpuSpeed, [0.25, 0.75], 'cpuSpeed quantization');
-}, 'An active ComputePressureObserver calls its callback at least once');
+promise_test(async t => {
+  await new Promise(resolve => {
+    const mySharedWorker = new SharedWorker(
+        '/compute-pressure/resources/observer-in-shared-worker.js');
+    mySharedWorker.port.start();
+    mySharedWorker.port.postMessage('observe');
+    mySharedWorker.port.onmessage = event => {
+      assert_equals(typeof event.data.time, 'number');
+      assert_equals('cpu', event.data.source);
+      resolve();
+    };
+  });
+}, 'Test receives updates from shared worker');

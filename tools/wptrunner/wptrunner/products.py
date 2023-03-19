@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import importlib
 import imp
 
@@ -20,7 +22,7 @@ def product_module(config, product):
     return module
 
 
-class Product(object):
+class Product:
     def __init__(self, config, product):
         module = product_module(config, product)
         data = module.__wptrunner__
@@ -60,6 +62,6 @@ def load_product_update(config, product):
     data = module.__wptrunner__
 
     update_properties = (getattr(module, data["update_properties"])()
-                         if "update_properties" in data else {})
+                         if "update_properties" in data else (["product"], {}))
 
     return update_properties

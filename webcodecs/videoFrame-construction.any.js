@@ -18,12 +18,12 @@ test(t => {
 
 test(t => {
   let image = makeImageBitmap(32, 16);
-  let frame = new VideoFrame(image, {timestamp: 10});
+  let frame = new VideoFrame(image, {timestamp: 10, duration: 15});
   frame.close();
 
   assert_equals(frame.format, null, 'format')
-  assert_equals(frame.timestamp, null, 'timestamp');
-  assert_equals(frame.duration, null, 'duration');
+  assert_equals(frame.timestamp, 10, 'timestamp');
+  assert_equals(frame.duration, 15, 'duration');
   assert_equals(frame.codedWidth, 0, 'codedWidth');
   assert_equals(frame.codedHeight, 0, 'codedHeight');
   assert_equals(frame.visibleRect, null, 'visibleRect');
@@ -33,6 +33,7 @@ test(t => {
   assert_equals(frame.colorSpace.transfer, null, 'colorSpace.transfer');
   assert_equals(frame.colorSpace.matrix, null, 'colorSpace.matrix');
   assert_equals(frame.colorSpace.fullRange, null, 'colorSpace.fullRange');
+  assert_true(isFrameClosed(frame));
 
   assert_throws_dom('InvalidStateError', () => frame.clone());
 }, 'Test closed VideoFrame.');
@@ -43,6 +44,31 @@ test(t => {
   assert_equals(frame.timestamp, -10, 'timestamp');
   frame.close();
 }, 'Test we can construct a VideoFrame with a negative timestamp.');
+
+promise_test(async t => {
+  verifyTimestampRequiredToConstructFrame(makeImageBitmap(1, 1));
+}, 'Test that timestamp is required when constructing VideoFrame from ImageBitmap');
+
+promise_test(async t => {
+  verifyTimestampRequiredToConstructFrame(makeOffscreenCanvas(16, 16));
+}, 'Test that timestamp is required when constructing VideoFrame from OffscreenCanvas');
+
+promise_test(async t => {
+  let init = {
+    format: 'I420',
+    timestamp: 1234,
+    codedWidth: 4,
+    codedHeight: 2
+  };
+  let data = new Uint8Array([
+    1, 2, 3, 4, 5, 6, 7, 8,  // y
+    1, 2,                    // u
+    1, 2,                    // v
+  ]);
+  let i420Frame = new VideoFrame(data, init);
+  let validFrame = new VideoFrame(i420Frame);
+  validFrame.close();
+}, 'Test that timestamp is NOT required when constructing VideoFrame from another VideoFrame');
 
 test(t => {
   let image = makeImageBitmap(1, 1);
@@ -67,6 +93,30 @@ test(t => {
     let frame = new VideoFrame(video, {timestamp: 10});
   })
 }, 'Test constructing w/ unusable image argument throws: HAVE_NOTHING <video>.');
+
+promise_test(async t => {
+  // Test only valid for Window contexts.
+  if (!('document' in self))
+    return;
+
+  let video = document.createElement('video');
+  video.src = 'av1.mp4';
+  video.autoplay = true;
+  video.controls = false;
+  video.muted = false;
+  document.body.appendChild(video);
+
+  const loadVideo = new Promise((resolve) => {
+    video.onloadeddata = () => resolve();
+  });
+  await loadVideo;
+
+  let frame = new VideoFrame(video, {timestamp: 10});
+  assert_equals(frame.codedWidth, 320, 'codedWidth');
+  assert_equals(frame.codedHeight, 240, 'codedHeight');
+  assert_equals(frame.timestamp, 10, 'timestamp');
+  frame.close();
+}, 'Test we can construct a VideoFrame from a <video>.');
 
 test(t => {
   let canvas = new OffscreenCanvas(0, 0);
@@ -444,6 +494,32 @@ test(t => {
 }, 'Test planar constructed I420 VideoFrame with colorSpace');
 
 test(t => {
+  let fmt = 'I420';
+  let vfInit = {
+    format: fmt,
+    timestamp: 1234,
+    codedWidth: 4,
+    codedHeight: 2,
+    colorSpace: {
+      primaries: null,
+      transfer: null,
+      matrix: null,
+      fullRange: null,
+    },
+  };
+  let data = new Uint8Array([
+    1, 2, 3, 4, 5, 6, 7, 8,  // y
+    1, 2,                    // u
+    1, 2,                    // v
+  ]);
+  let frame = new VideoFrame(data, vfInit);
+  assert_true(frame.colorSpace.primaries == null, 'color primaries');
+  assert_true(frame.colorSpace.transfer == null, 'color transfer');
+  assert_true(frame.colorSpace.matrix == null, 'color matrix');
+  assert_true(frame.colorSpace.fullRange == null, 'color range');
+}, 'Test planar constructed I420 VideoFrame with null colorSpace values');
+
+test(t => {
   let fmt = 'I420A';
   let vfInit = {format: fmt, timestamp: 1234, codedWidth: 4, codedHeight: 2};
   let data = new Uint8Array([
@@ -678,3 +754,4 @@ test(t => {
       'plane format should not have alpha: ' + frame.format);
   frame.close();
 }, 'Test a VideoFrame constructed from canvas can drop the alpha channel.');
+

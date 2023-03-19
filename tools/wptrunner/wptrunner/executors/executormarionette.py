@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import json
 import os
 import threading
@@ -71,7 +73,7 @@ def _switch_to_window(marionette, handle):
 
 class MarionetteBaseProtocolPart(BaseProtocolPart):
     def __init__(self, parent):
-        super(MarionetteBaseProtocolPart, self).__init__(parent)
+        super().__init__(parent)
         self.timeout = None
 
     def setup(self):
@@ -113,7 +115,7 @@ class MarionetteBaseProtocolPart(BaseProtocolPart):
         if socket_timeout:
             try:
                 self.marionette.timeout.script = socket_timeout / 2
-            except IOError:
+            except OSError:
                 self.logger.debug("Socket closed")
                 return
 
@@ -131,7 +133,7 @@ addEventListener("__test_restart", e => {e.preventDefault(); callback(true)})"""
                 # This can happen if we navigate, but just keep going
                 self.logger.debug(e)
                 pass
-            except IOError:
+            except OSError:
                 self.logger.debug("Socket closed")
                 break
             except Exception:
@@ -142,7 +144,7 @@ addEventListener("__test_restart", e => {e.preventDefault(); callback(true)})"""
 
 class MarionetteTestharnessProtocolPart(TestharnessProtocolPart):
     def __init__(self, parent):
-        super(MarionetteTestharnessProtocolPart, self).__init__(parent)
+        super().__init__(parent)
         self.runner_handle = None
         with open(os.path.join(here, "runner.js")) as f:
             self.runner_script = f.read()
@@ -409,7 +411,7 @@ class MarionetteAssertsProtocolPart(AssertsProtocolPart):
             except errors.NoSuchWindowException:
                 # If the window was already closed
                 self.parent.logger.warning("Failed to get assertion count; window was closed")
-            except (errors.MarionetteException, IOError):
+            except (errors.MarionetteException, OSError):
                 # This usually happens if the process crashed
                 pass
 
@@ -451,6 +453,19 @@ class MarionetteCookiesProtocolPart(CookiesProtocolPart):
         self.logger.info("Deleting all cookies")
         return self.marionette.delete_all_cookies()
 
+    def get_all_cookies(self):
+        self.logger.info("Getting all cookies")
+        return self.marionette.get_cookies()
+
+    def get_named_cookie(self, name):
+        self.logger.info("Getting cookie named %s" % name)
+        try:
+            return self.marionette.get_cookie(name)
+        # When errors.NoSuchCookieException is supported,
+        # that should be used here instead.
+        except Exception:
+            return None
+
 
 class MarionetteSendKeysProtocolPart(SendKeysProtocolPart):
     def setup(self):
@@ -478,6 +493,9 @@ class MarionetteActionSequenceProtocolPart(ActionSequenceProtocolPart):
         actions = self.marionette._to_json(actions)
         self.logger.info(actions)
         self.marionette._send_message("WebDriver:PerformActions", actions)
+
+    def release(self):
+        self.marionette._send_message("WebDriver:ReleaseActions", {})
 
 
 class MarionetteTestDriverProtocolPart(TestDriverProtocolPart):
@@ -532,7 +550,7 @@ class MarionetteCoverageProtocolPart(CoverageProtocolPart):
                 error = self.marionette.execute_async_script(script)
                 if error is not None:
                     raise Exception('Failure while resetting counters: %s' % json.dumps(error))
-            except (errors.MarionetteException, IOError):
+            except (errors.MarionetteException, OSError):
                 # This usually happens if the process crashed
                 pass
 
@@ -552,7 +570,7 @@ class MarionetteCoverageProtocolPart(CoverageProtocolPart):
                 error = self.marionette.execute_async_script(script)
                 if error is not None:
                     raise Exception('Failure while dumping counters: %s' % json.dumps(error))
-            except (errors.MarionetteException, IOError):
+            except (errors.MarionetteException, OSError):
                 # This usually happens if the process crashed
                 pass
 
@@ -593,13 +611,11 @@ class MarionetteSetPermissionProtocolPart(SetPermissionProtocolPart):
     def setup(self):
         self.marionette = self.parent.marionette
 
-    def set_permission(self, descriptor, state, one_realm):
+    def set_permission(self, descriptor, state):
         body = {
             "descriptor": descriptor,
             "state": state,
         }
-        if one_realm is not None:
-            body["oneRealm"] = one_realm
         try:
             self.marionette._send_message("WebDriver:SetPermission", body)
         except errors.UnsupportedOperationException:
@@ -612,7 +628,7 @@ class MarionettePrintProtocolPart(PrintProtocolPart):
         self.runner_handle = None
 
     def load_runner(self):
-        url = urljoin(self.parent.executor.server_url("http"), "/print_reftest_runner.html")
+        url = urljoin(self.parent.executor.server_url("http"), "/print_pdf_runner.html")
         self.logger.debug("Loading %s" % url)
         try:
             self.marionette.navigate(url)
@@ -639,7 +655,7 @@ class MarionettePrintProtocolPart(PrintProtocolPart):
                 "bottom": margin,
             },
             "shrinkToFit": False,
-            "printBackground": True,
+            "background": True,
         }
         return self.marionette._send_message("WebDriver:Print", body, key="value")
 
@@ -663,19 +679,24 @@ class MarionetteDebugProtocolPart(DebugProtocolPart):
 
     def load_devtools(self):
         with self.marionette.using_context(self.marionette.CONTEXT_CHROME):
+            # Once ESR is 107 is released, we can replace the ChromeUtils.import(DevToolsShim.jsm)
+            # with ChromeUtils.importESModule(DevToolsShim.sys.mjs) in this snippet:
             self.parent.base.execute_script("""
-const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
-const { TargetFactory } = require("devtools/client/framework/target");
-const { gDevTools } = require("devtools/client/framework/devtools");
+const { DevToolsShim } = ChromeUtils.import(
+  "chrome://devtools-startup/content/DevToolsShim.jsm"
+);
 
 const callback = arguments[arguments.length - 1];
 
 async function loadDevTools() {
-    const target = await TargetFactory.forTab(window.gBrowser.selectedTab);
-    await gDevTools.showToolbox(target, "webconsole", "window");
+    const tab = window.gBrowser.selectedTab;
+    await DevToolsShim.showToolboxForTab(tab, {
+          toolId: "webconsole",
+          hostType: "window"
+    });
 }
 
-loadDevTools().catch(() => dump("Devtools failed to load"))
+loadDevTools().catch((e) => console.error("Devtools failed to load", e))
               .then(callback);
 """, asynchronous=True)
 
@@ -703,7 +724,7 @@ class MarionetteProtocol(Protocol):
     def __init__(self, executor, browser, capabilities=None, timeout_multiplier=1, e10s=True, ccov=False):
         do_delayed_imports()
 
-        super(MarionetteProtocol, self).__init__(executor, browser)
+        super().__init__(executor, browser)
         self.marionette = None
         self.marionette_port = browser.marionette_port
         self.capabilities = capabilities
@@ -730,7 +751,7 @@ class MarionetteProtocol(Protocol):
             try:
                 self.marionette.raise_for_port()
                 break
-            except IOError:
+            except OSError:
                 # When running in a debugger wait indefinitely for Firefox to start
                 if self.executor.debug_info is None:
                     raise
@@ -753,7 +774,7 @@ class MarionetteProtocol(Protocol):
                 pass
         if self.marionette is not None:
             self.marionette = None
-        super(MarionetteProtocol, self).teardown()
+        super().teardown()
 
     def is_alive(self):
         try:
@@ -775,6 +796,16 @@ class MarionetteProtocol(Protocol):
             self.executor.original_pref_values[name] = self.prefs.get(name)
             self.prefs.set(name, value)
 
+        pac = new_environment.get("pac", None)
+
+        if pac != old_environment.get("pac", None):
+            if pac is None:
+                self.prefs.clear("network.proxy.type")
+                self.prefs.clear("network.proxy.autoconfig_url")
+            else:
+                self.prefs.set("network.proxy.type", 2)
+                self.prefs.set("network.proxy.autoconfig_url",
+                               urljoin(self.executor.server_url("http"), pac))
 
 class ExecuteAsyncScriptRun(TimedRunner):
     def set_timeout(self):
@@ -788,7 +819,7 @@ class ExecuteAsyncScriptRun(TimedRunner):
                 # make that possible. It also seems to time out immediately if the
                 # timeout is set too high. This works at least.
                 self.protocol.base.set_timeout(2**28 - 1)
-        except IOError:
+        except OSError:
             msg = "Lost marionette connection before starting test"
             self.logger.error(msg)
             return ("INTERNAL-ERROR", msg)
@@ -805,7 +836,7 @@ class ExecuteAsyncScriptRun(TimedRunner):
         except errors.ScriptTimeoutException:
             self.logger.debug("Got a marionette timeout")
             self.result = False, ("EXTERNAL-TIMEOUT", None)
-        except IOError:
+        except OSError:
             # This can happen on a crash
             # Also, should check after the test if the firefox process is still running
             # and otherwise ignore any other result and set it to crash
@@ -859,7 +890,7 @@ class MarionetteTestharnessExecutor(TestharnessExecutor):
             do_delayed_imports()
 
     def setup(self, runner):
-        super(MarionetteTestharnessExecutor, self).setup(runner)
+        super().setup(runner)
         for extension_path in self.install_extensions:
             self.logger.info("Installing extension from %s" % extension_path)
             addons = Addons(self.protocol.marionette)
@@ -918,7 +949,7 @@ class MarionetteTestharnessExecutor(TestharnessExecutor):
         self.protocol.base.set_window(test_window)
         protocol.testharness.test_window_loaded()
 
-        if self.debug_test:
+        if self.debug_test and self.browser.supports_devtools:
             self.protocol.debug.load_devtools()
 
         handler = CallbackHandler(self.logger, protocol, test_window)
@@ -984,7 +1015,7 @@ class MarionetteRefTestExecutor(RefTestExecutor):
                 else RefTestImplementation)(self)
 
     def setup(self, runner):
-        super(MarionetteRefTestExecutor, self).setup(runner)
+        super().setup(runner)
         for extension_path in self.install_extensions:
             self.logger.info("Installing extension from %s" % extension_path)
             addons = Addons(self.protocol.marionette)
@@ -999,7 +1030,7 @@ class MarionetteRefTestExecutor(RefTestExecutor):
                 handles = self.protocol.marionette.window_handles
                 if handles:
                     _switch_to_window(self.protocol.marionette, handles[0])
-            super(MarionetteRefTestExecutor, self).teardown()
+            super().teardown()
         except Exception:
             # Ignore errors during teardown
             self.logger.warning("Exception during reftest teardown:\n%s" %
@@ -1238,7 +1269,7 @@ class MarionettePrintRefTestExecutor(MarionetteRefTestExecutor):
                                            **kwargs)
 
     def setup(self, runner):
-        super(MarionettePrintRefTestExecutor, self).setup(runner)
+        super().setup(runner)
         if not isinstance(self.implementation, InternalRefTestImplementation):
             self.protocol.pdf_print.load_runner()
 

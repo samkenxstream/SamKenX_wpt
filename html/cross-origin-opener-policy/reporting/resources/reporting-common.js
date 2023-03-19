@@ -1,6 +1,12 @@
 const executor_path = "/common/dispatcher/executor.html?pipe=";
 const coep_header = '|header(Cross-Origin-Embedder-Policy,require-corp)';
 
+// Report endpoint keys must start with a lower case alphabet character.
+// https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-header-structure-15#section-4.2.3.3
+const reportToken = () => {
+  return token().replace(/./, 'a');
+}
+
 const isWPTSubEnabled = "{{GET[pipe]}}".includes("sub");
 
 const getReportEndpointURL = (reportID) =>
@@ -180,8 +186,7 @@ function replaceTokensInReceivedReport(str) {
   return str.replace(/.{8}-.{4}-.{4}-.{4}-.{12}/g, `(uuid)`);
 }
 
-// Run a test (such as coop_coep_test from ./common.js) then check that all
-// expected reports are present.
+// Run a test then check that all expected reports are present.
 async function reportingTest(testFunction, executorToken, expectedReports) {
   await new Promise(testFunction);
   expectedReports = Array.from(
@@ -386,6 +391,10 @@ const reportToHeaders = function(uuid) {
 // matching 'Reporting-Endpoints', 'Cross-Origin-Opener-Policy' and
 // 'Cross-Origin-Opener-Policy-Report-Only' headers.
 const reportingEndpointsHeaders = function (uuid) {
+  // Report endpoint keys must start with a lower case alphabet:
+  // https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-header-structure-15#section-4.2.3.3
+  assert_true(uuid.match(/^[a-z].*/) != null, 'Use reportToken() instead.');
+
   const report_endpoint_url = dispatcher_path + `?uuid=${uuid}`;
   const reporting_endpoints_header = `${uuid}="${report_endpoint_url}"`;
 

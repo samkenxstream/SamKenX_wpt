@@ -1,6 +1,6 @@
 <!doctype html>
 <title>@container: originating element container for pseudo elements</title>
-<link rel="help" href="https://github.com/w3c/csswg-drafts/issues/6711">
+<link rel="help" href="https://drafts.csswg.org/css-contain-3/#container-queries">
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
 <script src="support/cq-testcommon.js"></script>
@@ -60,7 +60,8 @@
   test(() => {
     assert_equals(getComputedStyle(outer, "::first-letter").color, green);
   }, "Originating element container for outer ::first-letter");
-  test(() => {
+  test((t) => {
+    t.add_cleanup(() => dialog.close());
     assert_equals(getComputedStyle(dialog, "::backdrop").backgroundColor, lime, "::backdrop not rendered");
     dialog.showModal();
     assert_equals(getComputedStyle(dialog, "::backdrop").backgroundColor, green, "::backdrop rendered");
